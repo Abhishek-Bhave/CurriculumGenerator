@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Curriculum Generator</title>
+  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;max-width:960px;margin:20px auto;padding:0 16px;line-height:1.5}header{margin-bottom:16px}label{display:block;margin-top:12px}input,textarea,select{width:100%;padding:8px;border:1px solid #ccc;border-radius:6px}button{padding:10px 14px;border:0;border-radius:6px;background:#2563eb;color:white;cursor:pointer}button[disabled]{opacity:.5;cursor:not-allowed}.row{display:flex;gap:12px}.col{flex:1}.card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:16px}.muted{color:#6b7280;font-size:.9em}pre{white-space:pre-wrap}</style>
+</head>
+<body>
+  <header>
+    <h1>AI Curriculum Generator</h1>
+    <p class="muted">Enter your course details and generate a full curriculum document.</p>
+  </header>
+  <main class="card">
+    <form id="form">
+      <label>Topic or Course<input name="topic" required placeholder="Intro to Data Science"/></label>
+      <label>Audience grade/level
+        <select name="audience" required>
+          <option>9-12</option>
+          <option>6-8</option>
+          <option>3-5</option>
+          <option>K-2</option>
+          <option>Undergrad</option>
+          <option>Adult learners</option>
+        </select>
+      </label>
+      <div class="row">
+        <label class="col">Weeks<input type="number" min="1" name="weeks" value="6" required/></label>
+        <label class="col">Classes/Week<input type="number" min="1" name="classesPerWeek" value="3" required/></label>
+        <label class="col">Minutes/Class<input type="number" min="20" name="minutesPerClass" value="55" required/></label>
+      </div>
+      <label>Learning goals (one per line)<textarea name="goals" rows="4" required>Understand core concepts
+Build working programs
+Practice testing</textarea></label>
+      <label>Standards (comma-separated or None)<input name="standards" placeholder="CSTA 3A-AP-16, CCSS.MATH.Practice.MP1 or None"/></label>
+      <label>Tech access level
+        <select name="techAccess" required>
+          <option>Low</option>
+          <option selected>Medium</option>
+          <option>High</option>
+        </select>
+      </label>
+      <label>Constraints (comma-separated)<input name="constraints" placeholder="Large class, ELLs, limited printing"/></label>
+      <label>Differentiation notes<textarea name="differentiation" rows="3"></textarea></label>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+        <button id="submit" type="submit">Generate</button>
+        <button id="export" type="button" disabled>Export PDF</button>
+        <span id="status" class="muted"></span>
+      </div>
+    </form>
+  </main>
+  <section id="output" class="card" style="display:none">
+    <h2>Generated Curriculum</h2>
+    <pre id="document"></pre>
+  </section>
+  <script type="module">
+  const form = document.getElementById('form');
+  const statusEl = document.getElementById('status');
+  const docEl = document.getElementById('document');
+  const out = document.getElementById('output');
+  const submitBtn = document.getElementById('submit');
+  const exportBtn = document.getElementById('export');
+
+  async function generate(e){
+    e.preventDefault();
+    statusEl.textContent = 'Generating...';
+    submitBtn.disabled = true;
+    try{
+      const data = new FormData(form);
+      const payload = {
+        topic: data.get('topic'),
+        audience: data.get('audience'),
+        length: {
+          weeks: Number(data.get('weeks')),
+          classesPerWeek: Number(data.get('classesPerWeek')),
+          minutesPerClass: Number(data.get('minutesPerClass'))
+        },
+        goals: String(data.get('goals')).split(/\n|;/).map(s=>s.trim()).filter(Boolean),
+        standards: (()=>{
+          const s = String(data.get('standards')||'').trim();
+          if(!s || s.toLowerCase() === 'none') return 'None';
+          return s.split(',').map(x=>x.trim()).filter(Boolean);
+        })(),
+        techAccess: data.get('techAccess'),
+        constraints: String(data.get('constraints')||'').split(',').map(s=>s.trim()).filter(Boolean),
+        differentiation: String(data.get('differentiation')||'').trim()
+      };
+      const res = await fetch('/api/curricula/generate',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if(!res.ok){
+        const t = await res.text();
+        throw new Error('Request failed: '+t);
+      }
+      const json = await res.json();
+      docEl.textContent = json.document;
+      out.style.display = 'block';
+      exportBtn.disabled = false;
+      statusEl.textContent = 'Done';
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = 'Error: '+err.message;
+    }finally{
+      submitBtn.disabled = false;
+    }
+  }
+
+  form.addEventListener('submit', generate);
+
+  exportBtn.addEventListener('click', async ()=>{
+    const { jsPDF } = await import('https://cdn.skypack.dev/jspdf');
+    const doc = new jsPDF({ unit:'pt', format:'letter' });
+    const lines = docEl.textContent.split('\n');
+    const margin = 40;
+    let y = margin;
+    const lineHeight = 14;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFont('Times','Normal');
+    for(const line of lines){
+      const split = doc.splitTextToSize(line, doc.internal.pageSize.getWidth() - margin*2);
+      for(const l of split){
+        if(y + lineHeight > pageHeight - margin){ doc.addPage(); y = margin; }
+        doc.text(l, margin, y);
+        y += lineHeight;
+      }
+    }
+    doc.save('curriculum.pdf');
+  });
+  </script>
+</body>
+</html>
+
